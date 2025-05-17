@@ -3,84 +3,45 @@ import pandas as pd
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-import os
 import re
 
-# ----------------------
-# Upload missing files
-# ----------------------
+st.set_page_config(page_title="CPSolvers Semantic Search", layout="wide")
+st.title("🧠 CPSolvers Semantic Search")
+st.markdown("Search segments from Clinical Problem Solvers transcripts using Boolean logic (`AND`, `OR`, `NOT`).")
 
-st.title("🧠 Clinical Problem Solvers Semantic Search")
-st.markdown("Search by symptom, presentation, or diagnostic phrase. Use **AND**, **OR**, and **NOT**. Example: `fever and night sweats and not tuberculosis`")
-
-uploaded_faiss = st.file_uploader("📁 Upload `cpsolvers_index.faiss`", type="faiss")
-uploaded_vectors = st.file_uploader("📁 Upload `chunk_vectors.npy`", type="npy")
-
-if uploaded_faiss and uploaded_vectors:
-    with open("cpsolvers_index.faiss", "wb") as f:
-        f.write(uploaded_faiss.read())
-    with open("chunk_vectors.npy", "wb") as f:
-        f.write(uploaded_vectors.read())
-    st.success("✅ Files uploaded successfully! Please **refresh the page** to load the search engine.")
-    st.stop()
-
-# Stop if files are still missing
-if not os.path.exists("cpsolvers_index.faiss") or not os.path.exists("chunk_vectors.npy"):
-    st.warning("⚠️ Required files missing. Please upload `cpsolvers_index.faiss` and `chunk_vectors.npy` to continue.")
-    st.stop()
-
-# ----------------------
-# Load precomputed data
-# ----------------------
-
+# ✅ Load everything directly — no file upload
 df = pd.read_csv("chunk_metadata.csv")
 chunks = df.to_dict(orient="records")
+vectors = np.load("chunk_vectors.npy")
 index = faiss.read_index("cpsolvers_index.faiss")
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# ----------------------
-# Boolean query parsing
-# ----------------------
+query = st.text_input("🔍 Enter your Boolean query:")
 
 def parse_boolean_query(query):
     query = query.lower()
-
     not_terms = re.findall(r'\bnot\s+([\w\s]+)', query)
     query = re.sub(r'\bnot\s+[\w\s]+', '', query)
-
     or_groups = [part.strip() for part in query.split(' or ')]
 
-    parsed = {
-        "or_groups": [],
-        "not_terms": [term.strip() for term in not_terms if term.strip()]
-    }
-
+    parsed = {"or_groups": [], "not_terms": [term.strip() for term in not_terms if term.strip()]}
     for group in or_groups:
         and_terms = [term.strip() for term in group.split(' and ') if term.strip()]
         if and_terms:
             parsed["or_groups"].append(and_terms)
-
     return parsed
-
-# ----------------------
-# Search interface
-# ----------------------
-
-query = st.text_input("🔍 Enter your Boolean query:")
 
 if query:
     parsed = parse_boolean_query(query)
-
     all_terms = [term for group in parsed["or_groups"] for term in group]
     term_embeddings = {term: model.encode(term) for term in all_terms}
-
     query_vector = np.mean(list(term_embeddings.values()), axis=0).reshape(1, -1)
     D, I = index.search(query_vector, k=30)
 
     shown = 0
     for idx in I[0]:
         chunk = chunks[idx]
-        text = chunk["text"].lower()
+        text = chunk['text'].lower()
 
         if any(term in text for term in parsed["not_terms"]):
             continue
@@ -95,14 +56,9 @@ if query:
             video_id = chunk["video_id"]
             start = chunk["start"]
             link = f"https://www.youtube.com/watch?v={video_id}&t={start}s"
-
             st.markdown(f"### [🔗 Watch Segment]({link})")
-            st.write(chunk["text"][:400] + "...")
+            st.write(chunk['text'][:400] + "...")
             st.markdown("---")
             shown += 1
-
         if shown >= 5:
             break
-
-    if shown == 0:
-        st.info("❔ No results matched **all conditions** in your query. Try adjusting the terms.")

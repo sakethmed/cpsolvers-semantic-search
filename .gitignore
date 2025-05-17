@@ -1,4 +1,6 @@
-venv/ 
-*.npy 
-*.faiss 
-__pycache__/ 
+venv/
+__pycache__/
+*.faiss
+*.npy
+*.pkl
+*.log
