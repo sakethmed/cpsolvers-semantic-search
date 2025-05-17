@@ -3,28 +3,51 @@ import pandas as pd
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
+import os
 import re
 
-# Load data
+# ----------------------
+# Upload missing files
+# ----------------------
+
+st.title("🧠 Clinical Problem Solvers Semantic Search")
+st.markdown("Search by symptom, presentation, or diagnostic phrase. Use **AND**, **OR**, and **NOT**. Example: `fever and night sweats and not tuberculosis`")
+
+uploaded_faiss = st.file_uploader("📁 Upload `cpsolvers_index.faiss`", type="faiss")
+uploaded_vectors = st.file_uploader("📁 Upload `chunk_vectors.npy`", type="npy")
+
+if uploaded_faiss and uploaded_vectors:
+    with open("cpsolvers_index.faiss", "wb") as f:
+        f.write(uploaded_faiss.read())
+    with open("chunk_vectors.npy", "wb") as f:
+        f.write(uploaded_vectors.read())
+    st.success("✅ Files uploaded successfully! Please **refresh the page** to load the search engine.")
+    st.stop()
+
+# Stop if files are still missing
+if not os.path.exists("cpsolvers_index.faiss") or not os.path.exists("chunk_vectors.npy"):
+    st.warning("⚠️ Required files missing. Please upload `cpsolvers_index.faiss` and `chunk_vectors.npy` to continue.")
+    st.stop()
+
+# ----------------------
+# Load precomputed data
+# ----------------------
+
 df = pd.read_csv("chunk_metadata.csv")
 chunks = df.to_dict(orient="records")
 index = faiss.read_index("cpsolvers_index.faiss")
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# UI
-st.title("🧠 Clinical Problem Solvers Semantic Search")
-st.markdown("Enter queries like `fever and night sweats and not malaria` using **AND**, **OR**, and **NOT**.")
-
-query = st.text_input("🔍 Enter your query:")
+# ----------------------
+# Boolean query parsing
+# ----------------------
 
 def parse_boolean_query(query):
     query = query.lower()
 
-    # Extract NOT terms
     not_terms = re.findall(r'\bnot\s+([\w\s]+)', query)
     query = re.sub(r'\bnot\s+[\w\s]+', '', query)
 
-    # Split into OR groups
     or_groups = [part.strip() for part in query.split(' or ')]
 
     parsed = {
@@ -39,14 +62,18 @@ def parse_boolean_query(query):
 
     return parsed
 
+# ----------------------
+# Search interface
+# ----------------------
+
+query = st.text_input("🔍 Enter your Boolean query:")
+
 if query:
     parsed = parse_boolean_query(query)
 
-    # Embed all terms
     all_terms = [term for group in parsed["or_groups"] for term in group]
     term_embeddings = {term: model.encode(term) for term in all_terms}
 
-    # Use average vector
     query_vector = np.mean(list(term_embeddings.values()), axis=0).reshape(1, -1)
     D, I = index.search(query_vector, k=30)
 
@@ -55,11 +82,9 @@ if query:
         chunk = chunks[idx]
         text = chunk["text"].lower()
 
-        # Exclude NOT terms
         if any(term in text for term in parsed["not_terms"]):
             continue
 
-        # Match OR groups (each OR group must match all its AND terms)
         match = False
         for group in parsed["or_groups"]:
             if all(term in text for term in group):
@@ -71,10 +96,13 @@ if query:
             start = chunk["start"]
             link = f"https://www.youtube.com/watch?v={video_id}&t={start}s"
 
-            st.markdown(f"### [🔗 Segment Link]({link})")
+            st.markdown(f"### [🔗 Watch Segment]({link})")
             st.write(chunk["text"][:400] + "...")
             st.markdown("---")
             shown += 1
 
         if shown >= 5:
             break
+
+    if shown == 0:
+        st.info("❔ No results matched **all conditions** in your query. Try adjusting the terms.")
