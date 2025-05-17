@@ -1,0 +1,4 @@
+venv/ 
+*.npy 
+*.faiss 
+__pycache__/ 
